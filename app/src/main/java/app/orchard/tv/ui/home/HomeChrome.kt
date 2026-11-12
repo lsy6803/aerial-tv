@@ -622,11 +622,11 @@ private fun darkened(src: ImageBitmap, alpha: Float): ImageBitmap {
 }
 
 /**
- * The large clock, as on the lock screen: the date (in Chinese, with the lunar one) over the time
- * in heavy digits, and under it the weather, the city it is for (issue #59) and today's high and
- * low. Left or right, the three lines share one edge, the tiles' edge. Each line's box is its
- * capitals' height ([capBox]), so the gaps between them are the gaps a reader sees. A soft shadow
- * keeps them readable on bright photos. The clock screensaver shows the same.
+ * The large clock, as on the lock screen: the date (in Chinese, with the lunar one) on its own line
+ * over the time in heavy digits, and below the time the weather line — the city it is for (issue #59),
+ * its condition and today's high and low. Left or right, the three lines share one edge, the tiles'
+ * edge. Each line's box is its capitals' height ([capBox]), so the gaps between them are the gaps a
+ * reader sees. A soft shadow keeps them readable on bright photos. The clock screensaver shows the same.
  */
 @Composable
 fun ShelfClock(
@@ -663,35 +663,38 @@ fun ShelfClock(
         compositingStrategy = CompositingStrategy.ModulateAlpha
     }
     Column(modifier, horizontalAlignment = if (alignEnd) Alignment.End else Alignment.Start) {
-        // On a TV set to Chinese, the Chinese calendar's date follows, as on the iPhone's lock screen.
+        // 第一行（小字）：公历日期 + 星期 + 农历，独占一行（中文环境下随 iPhone 锁屏样式）。
         val lunar = if (Locale.getDefault().language == "zh") Lunar.text(now.toLocalDate()) else null
-        BasicText(
-            buildAnnotatedString {
-                append(dateText(now))
-                if (lunar != null) withStyle(second) { append("  $lunar") }
-            },
-            style = Type.ClockDate.copy(shadow = shadow),
-            modifier = aside.capBox(Type.ClockDate.fontSize),
-        )
+        Row(aside.capBox(Type.ClockDate.fontSize), verticalAlignment = Alignment.CenterVertically) {
+            BasicText(
+                buildAnnotatedString {
+                    append(dateText(now))
+                    if (lunar != null) withStyle(second) { append(" $lunar") }
+                },
+                style = Type.ClockDate.copy(shadow = shadow),
+            )
+        }
+        // 第二行（超大粗体）：小时:分钟，不带秒。
         BasicText(
             timeText(now),
             style = Type.Clock.copy(shadow = shadow),
-            modifier = Modifier.padding(top = 16.dp)
+            modifier = Modifier.padding(top = 14.dp)
                 .toSaverClock(toSaver, Type.Clock.fontSize, 0.dp, drift)
                 .capBox(Type.Clock.fontSize),
         )
+        // 第三行（小字）：天气图标 + 温度 + 城市 · 天气 · 最高/最低，独占一行。
         Weather.now?.takeIf { AerialSettings.showWeather }?.let { w ->
-            val place = Weather.place?.takeIf { it.length <= 12 }
-            val range = if (w.high != null && w.low != null) stringResource(R.string.weather_high_low, w.high, w.low) else null
-            val detail = listOfNotNull(place, stringResource(conditionName(w.kind)), range).joinToString(" · ")
-            Row(aside.padding(top = 18.dp).capBox(Type.ClockDetail.fontSize), verticalAlignment = Alignment.CenterVertically) {
-                GlyphIcon(glyphFor(w), Color.White, 18.dp, Modifier.padding(end = 7.dp))
+            Row(aside.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                GlyphIcon(glyphFor(w), Color.White, 14.dp, Modifier.padding(end = 6.dp))
                 BasicText(
                     buildAnnotatedString {
                         append(stringResource(R.string.weather_temperature, w.celsius))
-                        withStyle(second) { append("  $detail") }
+                        val place = Weather.place?.takeIf { it.length <= 12 }
+                        if (place != null) append(" $place")
+                        append("  ·  " + stringResource(conditionName(w.kind)))
+                        if (w.high != null && w.low != null) append("  ·  " + stringResource(R.string.weather_high_low, w.high, w.low))
                     },
-                    style = Type.ClockDetail.copy(shadow = shadow),
+                    style = Type.ClockDate.copy(shadow = shadow),
                 )
             }
         }
@@ -758,16 +761,6 @@ private fun Modifier.capBox(fontSize: TextUnit) = layout { measurable, constrain
     layout(p.width, baseline - top) { p.place(0, -top) }
 }
 
-private fun conditionName(kind: WeatherKind): Int = when (kind) {
-    WeatherKind.Clear -> R.string.weather_clear
-    WeatherKind.PartlyCloudy -> R.string.weather_partly_cloudy
-    WeatherKind.Cloudy -> R.string.weather_cloudy
-    WeatherKind.Fog -> R.string.weather_fog
-    WeatherKind.Rain -> R.string.weather_rain
-    WeatherKind.Snow -> R.string.weather_snow
-    WeatherKind.Thunder -> R.string.weather_thunder
-}
-
 /**
  * The small clock: the time and the weather in one quiet line in the top left, level with the status
  * pill, so the wallpaper keeps the rest of the screen. A soft shadow keeps it readable on photos.
@@ -778,20 +771,23 @@ fun CornerClock(now: LocalDateTime, modifier: Modifier = Modifier, toSaver: () -
     val drift = heldDrift(saving, now)
     val dim = Color.White.copy(alpha = 0.92f)
     val shadow = Shadow(Color.Black.copy(alpha = 0.5f), blurRadius = 8f)
+    // Enlarged per user request: time reads clearly from the couch.
+    val timeSize = 32.sp
+    val weatherSize = 22.sp
     // The weather goes as the time moves to the screensaver's place.
     val aside = Modifier.graphicsLayer {
         alpha = 1f - (toSaver() * 2.5f).coerceIn(0f, 1f)
         compositingStrategy = CompositingStrategy.ModulateAlpha
     }
-    Row(modifier.height(34.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.height(timeSize.value.dp * 1.6f), verticalAlignment = Alignment.CenterVertically) {
         BasicText(
-            timeText(now), style = Type.SmallClock.copy(fontSize = Type.Title.fontSize, color = dim, shadow = shadow),
-            modifier = Modifier.toSaverClock(toSaver, Type.Title.fontSize, Type.Title.fontSize.value.dp * CAP_TOP, drift),
+            timeText(now), style = Type.SmallClock.copy(fontSize = timeSize, color = dim, shadow = shadow),
+            modifier = Modifier.toSaverClock(toSaver, timeSize, timeSize.value.dp * CAP_TOP, drift),
         )
         Weather.now?.takeIf { AerialSettings.showWeather }?.let { w ->
-            GlyphIcon(glyphFor(w), dim, 18.dp, aside.padding(start = 16.dp, end = 6.dp))
+            GlyphIcon(glyphFor(w), dim, 26.dp, aside.padding(start = 16.dp, end = 7.dp))
             val place = Weather.place?.takeIf { it.length <= 12 }
-            BasicText(listOfNotNull(place, stringResource(R.string.weather_temperature, w.celsius)).joinToString(" "), style = Type.Headline.copy(color = dim, shadow = shadow), modifier = aside)
+            BasicText(listOfNotNull(place, stringResource(R.string.weather_temperature, w.celsius)).joinToString(" "), style = Type.Headline.copy(fontSize = weatherSize, color = dim, shadow = shadow), modifier = aside)
         }
     }
 }
@@ -804,6 +800,16 @@ private fun glyphFor(w: WeatherNow): Glyph = when (w.kind) {
     WeatherKind.Rain -> Glyph.CloudRain
     WeatherKind.Snow -> Glyph.CloudSnow
     WeatherKind.Thunder -> Glyph.CloudBolt
+}
+
+private fun conditionName(kind: WeatherKind): Int = when (kind) {
+    WeatherKind.Clear -> R.string.weather_clear
+    WeatherKind.PartlyCloudy -> R.string.weather_partly_cloudy
+    WeatherKind.Cloudy -> R.string.weather_cloudy
+    WeatherKind.Fog -> R.string.weather_fog
+    WeatherKind.Rain -> R.string.weather_rain
+    WeatherKind.Snow -> R.string.weather_snow
+    WeatherKind.Thunder -> R.string.weather_thunder
 }
 
 /** "VPN" in a thin frame beside the network glyph while a VPN is up, as iOS's status bar has it (issue #809). */

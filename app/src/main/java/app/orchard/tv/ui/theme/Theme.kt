@@ -79,12 +79,12 @@ val InterDisplay = inter(32f)
 object Type {
     val Clock = TextStyle(
         fontFamily = InterDisplay, fontWeight = FontWeight.W700,
-        fontSize = 104.sp, letterSpacing = (-0.04).em, color = Palette.Label,
+        fontSize = 64.sp, letterSpacing = (-0.04).em, color = Palette.Label,
     )
     /** Over and under the large clock: the date, and the weather. */
     val ClockDate = TextStyle(
         fontFamily = InterDisplay, fontWeight = FontWeight.W600,
-        fontSize = 19.sp, letterSpacing = (-0.005).em, color = Palette.Label,
+        fontSize = 13.sp, letterSpacing = (-0.005).em, color = Palette.Label,
     )
     val ClockDetail = TextStyle(
         fontFamily = InterText, fontWeight = FontWeight.W600,

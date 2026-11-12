@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.content.edit
 import app.orchard.tv.ui.components.UhdCanvas
 import app.orchard.tv.BuildConfig
+import app.orchard.tv.R
 import app.orchard.tv.guard.GuardSetup
 import app.orchard.tv.settings.AerialSettings
 import app.orchard.tv.system.DiagLog
@@ -37,7 +38,7 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-enum class WallpaperKind { Daily, Builtin, Photo, Auto, Live, Video, Source }
+enum class WallpaperKind { Daily, Builtin, Photo, Auto, Live, Video, Source, BVideo }
 
 data class Wallpaper(
     val id: String,
@@ -89,6 +90,9 @@ object Wallpapers {
     const val VIDEOS = "videos:mine"
     const val VIDEO_PREFIX = "video:"
     const val SOURCE_PREFIX = "source:"
+    /** Built-in (bundled) video wallpapers: "bvid:<key>" for one, "bvid:mine" for all in turn. */
+    const val BUILTIN_VIDEO_PREFIX = "bvid:"
+    const val BUILTIN_VIDEOS = "bvid:mine"
     /** The picture under a TV input's, for the glass and while the input has nothing to show. */
     private const val SOURCE_PICTURE = "hills_night"
     private const val FOLLOW = "follow"
@@ -135,10 +139,17 @@ object Wallpapers {
     fun moves(id: String = selectedId) = id == LIVE || isVideo(id)
 
     /** The owner's videos, all in turn or one of them. */
-    fun isVideo(id: String = selectedId) = id == VIDEOS || id.startsWith(VIDEO_PREFIX)
+    fun isVideo(id: String = selectedId) = id == VIDEOS || id.startsWith(VIDEO_PREFIX) || id.startsWith(BUILTIN_VIDEO_PREFIX)
+
+    /** A bundled (built-in) video wallpaper. */
+    fun isBuiltinVideo(id: String = selectedId) = id.startsWith(BUILTIN_VIDEO_PREFIX)
 
     /** The films [id] plays behind Home: all the owner's videos, or the one chosen. Call off the main thread. */
     fun videoFilms(id: String = selectedId): List<ScreensaverVideo> {
+        if (id.startsWith(BUILTIN_VIDEO_PREFIX)) {
+            val all = BuiltinVideos.all(app)
+            return if (id == BUILTIN_VIDEOS) all else all.filter { it.id == id.removePrefix(BUILTIN_VIDEO_PREFIX) }
+        }
         val all = ScreensaverVideos.all(app)
         return if (id.startsWith(VIDEO_PREFIX)) all.filter { it.id == id.removePrefix(VIDEO_PREFIX) } else all
     }
@@ -146,8 +157,9 @@ object Wallpapers {
     /** Whether the frame the videos last stopped on is one of [id]'s films. */
     private fun videoFrameIsOf(id: String): Boolean {
         if (!videoFrame.exists()) return false
-        if (!id.startsWith(VIDEO_PREFIX)) return true
-        return prefs.getString("video_film", null) == id.removePrefix(VIDEO_PREFIX)
+        if (!id.startsWith(VIDEO_PREFIX) && !id.startsWith(BUILTIN_VIDEO_PREFIX)) return true
+        val prefix = if (id.startsWith(BUILTIN_VIDEO_PREFIX)) BUILTIN_VIDEO_PREFIX else VIDEO_PREFIX
+        return prefs.getString("video_film", null) == id.removePrefix(prefix)
     }
 
     /**
@@ -201,6 +213,7 @@ object Wallpapers {
         if (started) return
         started = true
         app = context.applicationContext
+        BuiltinVideos.seed(app)
         measure(context).let { (w, h) -> screenW = w; screenH = h }
         selectedId = (prefs.getString("selected", LATEST_DAILY) ?: LATEST_DAILY)
             // A built-in wallpaper from before the Mac-style set: its nearest one now.
@@ -218,6 +231,28 @@ object Wallpapers {
         scope.launch(Dispatchers.IO) { clearStaleUploads() }
         // Installs from before 1.42 have a baked picture but no copy yet.
         scope.launch(Dispatchers.IO) { keepForLockedBoot() }
+        // Pre-render the built-in animations' posters in the background, so the picker's cards
+        // (and the one that plays them all in turn, which shows the first) show at once.
+        scope.launch(Dispatchers.IO) { preloadBuiltinPosters() }
+    }
+
+    /**
+     * Reads or makes each built-in animation's poster.jpg once, off the main thread. The cards
+     * then decode the kept file (fast) instead of pulling a frame from the film (slow, and it
+     * jams on some TVs), so the picker opens with every card's picture already in place.
+     */
+    private fun preloadBuiltinPosters() {
+        for (film in BuiltinVideos.all(app)) {
+            if (posterOf(film).exists()) continue
+            val mmr = android.media.MediaMetadataRetriever()
+            runCatching {
+                mmr.setDataSource(film.file.path)
+                mmr.getFrameAtTime(0)?.let { keepPoster(film, it) }
+            }.onFailure { Log.w(TAG, "poster preload: ${film.id} failed", it) }
+            runCatching { mmr.release() }
+        }
+        // The cards may have shown plain fills while the posters were made; bump so they redraw.
+        scope.launch { pictureVersion++ }
     }
 
     /** [context]'s window in pixels, times the panel's scale where Home is drawn at 4K (UhdCanvas). */
@@ -291,6 +326,10 @@ object Wallpapers {
         ROTATE_PHOTOS -> items.filter { it.kind == WallpaperKind.Photo }.sortedBy { it.id }.let { photos ->
             if (photos.isEmpty()) resolve(LATEST_DAILY) else photos[Math.floorMod(photoSlot(), photos.size)]
         }
+        // "Built-in animations, in turn" is a virtual entry (all bundled videos at once); it has no
+        // film of its own, so its cover and Home backdrop use the first bundled video (see videoFilms
+        // / firstVideoFrame). Without this it was absent from items and showed a blank card.
+        BUILTIN_VIDEOS -> Wallpaper(BUILTIN_VIDEOS, WallpaperKind.BVideo, app.getString(R.string.wp_builtin_videos_rotate))
         // Inputs are listed after Home starts; until then the input is taken on trust.
         else -> items.firstOrNull { it.id == id }
             ?: if (isSource(id)) Wallpaper(id, WallpaperKind.Source, id.substringAfterLast('/')) else null
@@ -343,7 +382,7 @@ object Wallpapers {
         // Until a film has stopped on a frame, the first built-in stands in.
         WallpaperKind.Live -> liveFrame.takeIf { it.exists() }?.let { Images.decodeCover(it, w, h) }
             ?: Gradients.render(Gradients.presets.first(), w, h)
-        WallpaperKind.Video -> videoPicture(wp.id, w, h) ?: Gradients.render(Gradients.presets.first(), w, h)
+        WallpaperKind.Video, WallpaperKind.BVideo -> videoPicture(wp.id, w, h) ?: Gradients.render(Gradients.presets.first(), w, h)
         WallpaperKind.Source -> Gradients.byKey(SOURCE_PICTURE)?.let { Gradients.render(it, w, h) }
     }
 
@@ -354,9 +393,14 @@ object Wallpapers {
     /** A film's own picture for its card, kept beside it, so it goes when the film is deleted. */
     private fun posterOf(film: ScreensaverVideo) = File(film.file.parentFile, "poster.jpg")
 
-    /** The poster kept for the owner's video [film], if one was; never read from the film itself. */
-    fun videoPoster(film: String, w: Int, h: Int): Bitmap? =
-        videoFilms(VIDEOS).firstOrNull { it.id == film }?.let(::posterOf)?.takeIf { it.exists() }?.let { Images.decodeCover(it, w, h) }
+    /** The poster kept for [film]'s video (owner's or built-in), if one was; never read from the film itself. */
+    fun videoPoster(film: String, w: Int, h: Int): Bitmap? {
+        val key = film.removePrefix(BUILTIN_VIDEO_PREFIX)
+        val film0 = BuiltinVideos.file(app, key)?.let { ScreensaverVideo(key, "", it) }
+            ?: ScreensaverVideos.all(app).firstOrNull { it.id == key }
+            ?: return null
+        return posterOf(film0).takeIf { it.exists() }?.let { Images.decodeCover(it, w, h) }
+    }
 
     private fun keepPoster(film: ScreensaverVideo, frame: Bitmap) {
         val poster = posterOf(film)
@@ -399,7 +443,13 @@ object Wallpapers {
         synchronized(thumbs) { thumbs[id] }?.let { return it }
         // A frame kept meanwhile (useLiveFrame) makes this one old: shown, not kept.
         val version = pictureVersion
-        val wp = (if (id == LATEST_DAILY || id == ROTATE_PHOTOS) resolve(id) else items.firstOrNull { it.id == id }) ?: return null
+        // The virtual "all built-in animations" entry (bvid:mine) is not in items, so look it up
+        // directly; its cover is the first bundled video (videoFilms / firstVideoFrame), not blank.
+        val wp = when {
+            id == LATEST_DAILY || id == ROTATE_PHOTOS -> resolve(id)
+            id == BUILTIN_VIDEOS -> Wallpaper(BUILTIN_VIDEOS, WallpaperKind.BVideo, "")
+            else -> items.firstOrNull { it.id == id }
+        } ?: return null
         val b = when (wp.kind) {
             WallpaperKind.Auto -> Gradients.render(Gradients.autoThumb, 384, 216)
             // Not kept while no frame of the film can be had: the next look tries again (issue #1158).
@@ -453,11 +503,11 @@ object Wallpapers {
         val stamp = when (wp.kind) {
             WallpaperKind.Daily, WallpaperKind.Photo -> fileFor(wp)?.lastModified() ?: 0L
             WallpaperKind.Live -> liveFrame.lastModified()
-            WallpaperKind.Video -> if (videoFrameIsOf(wp.id)) videoFrame.lastModified() else 0L
+            WallpaperKind.Video, WallpaperKind.BVideo -> if (videoFrameIsOf(wp.id)) videoFrame.lastModified() else 0L
             else -> 0L
         }
         // "clear": a film's picture baked unshaded, not one kept from when it was shaded.
-        val film = if (wp.kind == WallpaperKind.Live || wp.kind == WallpaperKind.Video) "|clear" else ""
+        val film = if (wp.kind == WallpaperKind.Live || wp.kind == WallpaperKind.Video || wp.kind == WallpaperKind.BVideo) "|clear" else ""
         return "${wp.id}|$stamp|${screenW}x$screenH|${BuildConfig.VERSION_CODE}$film"
     }
 
@@ -552,7 +602,13 @@ object Wallpapers {
         val key = if (video) "video" else "live"
         prefs.edit { putString("${key}_film", film).putLong("${key}_at", atMs).remove("${key}_left_film").remove("${key}_left_at") }
         // The frame is both the film's own card and the card that plays them all in turn (useLiveFrame).
-        synchronized(thumbs) { thumbs.remove(id); if (video) { thumbs.remove(VIDEOS); thumbs.remove(VIDEO_PREFIX + film) } }
+        synchronized(thumbs) {
+            thumbs.remove(id)
+            if (video) {
+                thumbs.remove(VIDEOS); thumbs.remove(VIDEO_PREFIX + film)
+                thumbs.remove(BUILTIN_VIDEOS); thumbs.remove(BUILTIN_VIDEO_PREFIX + film)
+            }
+        }
         backdrop = prepared.frame.asImageBitmap()
         frosted = prepared.frost.asImageBitmap()
         pictureVersion++
@@ -802,8 +858,10 @@ object Wallpapers {
         val videos = if (films.isEmpty()) emptyList() else
             listOf(Wallpaper(VIDEOS, WallpaperKind.Video, if (zh) "我的视频 · 轮播" else "My Videos, In Turn")) +
                 films.map { Wallpaper(VIDEO_PREFIX + it.id, WallpaperKind.Video, it.name.substringBeforeLast('.').ifBlank { it.name }) }
+        // Bundled animations, shipped with Aerial, offline and free.
+        val builtinVideos = BuiltinVideos.specified(zh)
         val inputs = sources.map { (id, name) -> Wallpaper(SOURCE_PREFIX + id, WallpaperKind.Source, name) }
-        items = listOf(live) + videos + daily + builtins + photos + auto + inputs
+        items = listOf(live) + videos + builtinVideos + daily + builtins + photos + auto + inputs
     }
 
     // ---- daily photos ----

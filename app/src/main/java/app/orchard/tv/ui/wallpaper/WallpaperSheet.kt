@@ -436,13 +436,18 @@ private fun WallpaperRows(takeFocus: Boolean) {
     val dailyTitle = stringResource(R.string.wp_daily_latest)
     val rotateTitle = stringResource(R.string.wp_photos_rotate)
     val videosTitle = stringResource(R.string.wp_videos_rotate)
-    val list = remember(items, selected, dailyTitle, rotateTitle, videosTitle) {
+    val builtinVideosTitle = stringResource(R.string.wp_builtin_videos_rotate)
+    val list = remember(items, selected, dailyTitle, rotateTitle, videosTitle, builtinVideosTitle) {
         buildList {
             addAll(items.filter { it.kind == WallpaperKind.Live })
             // Each video on its own, and with two or more one card that plays them in turn (#762).
             val videos = items.filter { it.kind == WallpaperKind.Video && it.id != Wallpapers.VIDEOS }
             if (videos.size > 1 || selected == Wallpapers.VIDEOS) add(Wallpaper(Wallpapers.VIDEOS, WallpaperKind.Video, videosTitle))
             addAll(videos)
+            // Bundled animations, shipped with Aerial and free; all in turn, then each on its own.
+            val builtinVideos = items.filter { it.kind == WallpaperKind.BVideo }
+            if (builtinVideos.size > 1 || selected == Wallpapers.BUILTIN_VIDEOS) add(Wallpaper(Wallpapers.BUILTIN_VIDEOS, WallpaperKind.BVideo, builtinVideosTitle))
+            addAll(builtinVideos)
             if (items.any { it.kind == WallpaperKind.Daily }) add(Wallpaper(Wallpapers.LATEST_DAILY, WallpaperKind.Daily, dailyTitle))
             addAll(items.filter { it.kind == WallpaperKind.Daily && it.id == selected })
             val photos = items.filter { it.kind == WallpaperKind.Photo }
@@ -486,6 +491,7 @@ private fun wallpaperNote(wp: Wallpaper): String? = when {
     wp.kind == WallpaperKind.Live -> stringResource(R.string.wp_live)
     wp.id == Wallpapers.VIDEOS -> stringResource(R.string.wp_videos_note)
     wp.kind == WallpaperKind.Video -> stringResource(R.string.wp_video_note)
+    wp.kind == WallpaperKind.BVideo -> stringResource(R.string.wp_builtin_video_note)
     wp.kind == WallpaperKind.Source -> stringResource(R.string.wp_source_note)
     wp.id == Wallpapers.LATEST_DAILY -> stringResource(R.string.wp_daily_note)
     wp.id == Wallpapers.ROTATE_PHOTOS -> stringResource(R.string.wp_photos_rotate_note)
@@ -502,7 +508,7 @@ private fun WallpaperCard(wp: Wallpaper, focusRequester: FocusRequester?, onFocu
     val selected = Wallpapers.selectedId == wp.id
     // A moving wallpaper's card is made again when the frame it stopped on changes, also while the
     // sheet is open: the film stopped as the sheet opened is decoded seconds later (Xiaomi MiTV-MFTR0).
-    val picture = if (wp.kind == WallpaperKind.Live || wp.kind == WallpaperKind.Video) Wallpapers.pictureVersion else 0
+    val picture = if (wp.kind == WallpaperKind.Live || wp.kind == WallpaperKind.Video || wp.kind == WallpaperKind.BVideo) Wallpapers.pictureVersion else 0
     // The picture is cut to the card's continuous outline once, at the size it is drawn, so the
     // card is one image draw and nothing is clipped (see SmoothCorners.kt).
     val density = LocalDensity.current
@@ -543,7 +549,7 @@ private fun WallpaperCard(wp: Wallpaper, focusRequester: FocusRequester?, onFocu
                     ) { GlyphIcon(Glyph.Check, Palette.OnFocus, 13.dp) }
                 }
                 // The aerial wallpaper moves; its card shows the last frame it stopped on.
-                if (wp.kind == WallpaperKind.Live || wp.kind == WallpaperKind.Video) {
+                if (wp.kind == WallpaperKind.Live || wp.kind == WallpaperKind.Video || wp.kind == WallpaperKind.BVideo) {
                     GlyphIcon(Glyph.Play, Color.White, 22.dp, Modifier.align(Alignment.BottomStart).padding(7.dp))
                 }
                 // An input's picture cannot be copied for a card: its mark over the dark picture.

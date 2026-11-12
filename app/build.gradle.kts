@@ -12,6 +12,8 @@ plugins {
 
 android {
     namespace = "app.orchard.tv"
+    // 本机用腾讯镜像装了 build-tools 35.0.0；AGP 8.12 最低要求 35.0.0，显式锁到该版本
+    buildToolsVersion = "35.0.0"
     compileSdk = 36
 
     defaultConfig {
@@ -33,6 +35,12 @@ android {
     // and the guard crashed on every bind on Android 5 (issues #1010 #1012 #1017 #1018).
     lint {
         fatal += "NewApi"
+    }
+
+    // The bundled animations (assets/builtin-videos) are media; keep them uncompressed so they
+    // stream straight from the APK without an extra decompression pass on first use.
+    aaptOptions {
+        noCompress("mp4")
     }
 
     // standard: a normal HOME app. guard: no HOME intent filter at all, for China-market firmwares

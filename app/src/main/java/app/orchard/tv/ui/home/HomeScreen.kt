@@ -122,8 +122,8 @@ private val ShelfRowGap = 30.dp
  */
 private val RowNameRoom = 50.dp
 
-/** Where the large clock's date sits: just under the status pill. */
-private val LargeClockTop = 80.dp
+/** Where the large clock's date sits: raised some 2 cm from under the status pill, per the owner. */
+private val LargeClockTop = 42.dp
 
 /**
  * From the large clock's top to where the shelf may start: its weather line ends some 136 dp down

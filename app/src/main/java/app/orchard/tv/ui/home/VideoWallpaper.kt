@@ -33,6 +33,8 @@ import app.orchard.tv.settings.AerialSettings
 import app.orchard.tv.system.DiagLog
 import app.orchard.tv.ui.theme.Motion
 import app.orchard.tv.wallpaper.AerialStream
+import app.orchard.tv.wallpaper.BuiltinVideos
+import app.orchard.tv.wallpaper.ScreensaverVideo
 import app.orchard.tv.wallpaper.ScreensaverVideos
 import app.orchard.tv.wallpaper.Wallpapers
 import kotlinx.coroutines.Dispatchers
@@ -225,9 +227,13 @@ fun VideoWallpaper(
                     prepare()
                 }
             })
+            // Each film plays twice in a row before the next one, so both a single chosen
+            // theme (REPEAT_MODE_ALL loops the list) and the "in turn" rotation feel slower
+            // and do not flick between clips too quickly (the short bundled clips especially).
+            val repeatEach = 2
             setMediaItems(
-                films.map { MediaItem.Builder().setUri(it.file.toUri()).setMediaId(it.id).build() },
-                first.coerceAtLeast(0),
+                films.flatMap { f -> List(repeatEach) { MediaItem.Builder().setUri(f.file.toUri()).setMediaId(f.id).build() } },
+                first.coerceAtLeast(0) * repeatEach,
                 if (first >= 0) spot?.second ?: 0L else 0L,
             )
             surface?.let { setVideoSurfaceView(it) }
@@ -435,7 +441,10 @@ private const val SHAPE_SLACK = 0.02f
  * no software decoder, a green frame).
  */
 internal suspend fun keyFrameOfVideo(context: android.content.Context, id: String, atMs: Long, w: Int, h: Int): Pair<Bitmap, Long>? {
-    val film = withContext(Dispatchers.IO) { ScreensaverVideos.all(context).firstOrNull { it.id == id } } ?: return null
+    val film = withContext(Dispatchers.IO) {
+        ScreensaverVideos.all(context).firstOrNull { it.id == id }
+            ?: BuiltinVideos.file(context, id)?.let { ScreensaverVideo(id, "", it) }
+    } ?: return null
     val started = android.os.SystemClock.elapsedRealtime()
     val frame = try {
         withTimeoutOrNull(VIDEO_KEY_FRAME_MS) { AerialStream.keyFrameOfFile(film.file, id, atMs, w, h) }
@@ -463,7 +472,9 @@ private const val VIDEO_KEY_FRAME_MS = 4_000L
 
 /** Frame [atMs] of the owner's video [id], screen-sized and drawable on, or null. */
 private fun fileFrame(context: android.content.Context, id: String, atMs: Long, w: Int, h: Int): Bitmap? {
-    val film = ScreensaverVideos.all(context).firstOrNull { it.id == id } ?: return null
+    val film = ScreensaverVideos.all(context).firstOrNull { it.id == id }
+        ?: BuiltinVideos.file(context, id)?.let { ScreensaverVideo(id, "", it) }
+        ?: return null
     val mmr = MediaMetadataRetriever()
     retrieving = true
     return try {

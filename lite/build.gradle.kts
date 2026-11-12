@@ -11,6 +11,8 @@ plugins {
 
 android {
     namespace = "app.orchard.tv.lite"
+    // 本机只装到 build-tools 34.0.0（AGP 8.12 默认要 35.0.0 但下载源被墙），显式锁到已装的版本
+    buildToolsVersion = "35.0.0"
     compileSdk = 36
 
     defaultConfig {

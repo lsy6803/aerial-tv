@@ -39,9 +39,23 @@ case "$FLAVOR" in standard|guard|repair|lite) ;; *) echo "flavor must be standar
 PKG=app.orchard.tv
 GUARD="$PKG/$PKG.guard.HomeGuardService"
 
-export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+# Pick a sensible default only when the variable is unset (the env on this
+# machine already exports ANDROID_HOME / JAVA_HOME, so these branches are no-ops there).
+if [ -z "${ANDROID_HOME:-}" ]; then
+  case "$(uname -s)" in
+    Darwin) ANDROID_HOME="$HOME/Library/Android/sdk" ;;
+    *)      ANDROID_HOME="${LOCALAPPDATA:-$HOME/AppData/Local}/Android/Sdk" ;;
+  esac
+fi
+export ANDROID_HOME
 if [ "${BUILD:-0}" = 1 ]; then
-  export JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 17 2>/dev/null || echo /opt/homebrew/opt/openjdk@17)}"
+  if [ -z "${JAVA_HOME:-}" ]; then
+    case "$(uname -s)" in
+      Darwin) JAVA_HOME="$(/usr/libexec/java_home -v 17 2>/dev/null || echo /opt/homebrew/opt/openjdk@17)" ;;
+      *)      JAVA_HOME="${ProgramFiles:-/c/Program Files}/Java/jdk-17" ;;
+    esac
+  fi
+  export JAVA_HOME
   [ -f local.properties ] || echo "sdk.dir=$ANDROID_HOME" > local.properties
 fi
 
@@ -262,7 +276,8 @@ build() {
 version_code() {   # versionCode of the APK on disk; empty without the Android SDK
   # Several build-tools versions may be installed; a bare glob would pass the others as arguments.
   local aapt2
-  aapt2=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -1)
+  # Windows ships aapt2.exe; macOS/Linux just aapt2. Match both.
+  aapt2=$(find "$ANDROID_HOME"/build-tools -maxdepth 2 -type f \( -name aapt2 -o -name aapt2.exe \) 2>/dev/null | sort -V | tail -1)
   [ -n "$aapt2" ] || return 0
   "$aapt2" dump badging "$1" 2>/dev/null | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1
 }

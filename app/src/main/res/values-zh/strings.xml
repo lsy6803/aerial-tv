@@ -261,6 +261,8 @@
     <string name="wp_videos_note">你从手机发来的视频，静音、一个接一个播放。和航拍一样会动，按键时停在当前画面。</string>
     <string name="wp_videos_rotate">我的视频 · 轮播</string>
     <string name="wp_video_note">你从手机发来的这个视频，静音、循环播放。和航拍一样会动，按键时停在当前画面。</string>
+    <string name="wp_builtin_videos_rotate">内置动画 · 轮播</string>
+    <string name="wp_builtin_video_note">应用内置的动画，离线、循环、静音播放。和航拍一样会动，按键时停在当前画面。</string>
     <string name="wp_source_note">这个信号源的实时画面，没有声音，打开这个信号源才有声音。往下选 App 时换成磨砂背景；没有画面时显示深色背景。</string>
     <string name="st_play">播放</string>
     <string name="st_play_still">静止时</string>
