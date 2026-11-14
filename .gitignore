@@ -5,6 +5,10 @@ local.properties
 *.iml
 .kotlin/
 
+# JVM / Gradle 崩溃日志（本地产物，非源码）
+hs_err_pid*.log
+replay_pid*.log
+
 # Machine- and household-specific: TV addresses, signing key. Hand over privately.
 local/
 .DS_Store

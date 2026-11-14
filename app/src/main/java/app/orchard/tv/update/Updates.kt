@@ -188,16 +188,21 @@ object Updates {
 
     /**
      * 从本仓库最新 Release 取版本号：标签去前导 v、去 "-" 后缀（如 v1.96-custom → 1.96）。
-     * 优先走 gh-proxy 适配国内网络，直连 GitHub 兜底；都失败返回 null（不提示更新）。
+     * 优先走 gh-proxy 适配国内网络，直连 GitHub 兜底；都失败抛异常（由 UpdateCheck 重试/忽略）。
      */
-    private fun latestVersion(): String? {
+    private fun latestVersion(): String {
+        var lastErr: Throwable? = null
         for (api in listOf(REPO_API_PROXY, REPO_API)) {
-            val json = runCatching { read(api) }.getOrNull() ?: continue
-            val tag = runCatching { JSONObject(json).getString("tag_name") }.getOrNull() ?: continue
-            val v = tag.removePrefix("v").substringBefore('-')
-            if (v.isNotEmpty()) return v
+            try {
+                val json = read(api)
+                val tag = JSONObject(json).getString("tag_name")
+                val v = tag.removePrefix("v").substringBefore('-')
+                if (v.isNotEmpty()) return v
+            } catch (e: Throwable) {
+                lastErr = e
+            }
         }
-        return null
+        throw lastErr ?: RuntimeException("no update source available")
     }
 
     /**
