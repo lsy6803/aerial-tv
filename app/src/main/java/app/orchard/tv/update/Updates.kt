@@ -33,11 +33,12 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
+import org.json.JSONObject
 
 /**
  * Whether a newer release is out (issues #24, #76). Most owners stay on the version they installed
- * and report bugs fixed long ago. Aerial reads the latest release's tag from the
- * website (reachable in China, unlike GitHub); Control Center then names the new version and says
+ * and report bugs fixed long ago. Aerial reads the latest release's tag from its own repository
+ * (lsy6803/aerial-tv, via gh-proxy for China reachability); Control Center then names the new version and says
  * how to update. Nothing is downloaded or installed in the background: only when the owner picks
  * "Download and Install" does Aerial fetch the new APK and hand it to the system installer
  * ([install]).
@@ -48,8 +49,13 @@ import java.util.Locale
 object Updates {
     private const val TAG = "AerialUpdates"
     private const val PREFS = "updates"
-    private const val VERSION_URL = "https://aerial.qust.me/download/version.txt"
-    private const val NOTES_URL = "https://aerial.qust.me/download/notes.json"
+    /**
+     * 更新检测指向用户自己的仓库 lsy6803/aerial-tv，不再连上游 pengchujin。
+     * 走 gh-proxy 代理以适配国内网络，直连 GitHub 作为兜底。
+     */
+    private const val REPO = "lsy6803/aerial-tv"
+    private const val REPO_API = "https://api.github.com/repos/$REPO/releases/latest"
+    private const val REPO_API_PROXY = "https://gh-proxy.com/https://api.github.com/repos/$REPO/releases/latest"
 
     /**
      * A source that delivers less than [STALL_BYTES] in [STALL_MS] is given up for the next one
@@ -93,7 +99,7 @@ object Updates {
         checker = UpdateCheck(
             scope = scope,
             lastSuccess = { prefs.getLong("checked_at", 0) },
-            read = { withContext(Dispatchers.IO) { read(VERSION_URL) } },
+            read = { withContext(Dispatchers.IO) { latestVersion() } },
             save = { latest, checkedAt ->
                 prefs.edit { putString("latest", latest); putLong("checked_at", checkedAt) }
                 available = latest.takeIf { newer(it, current) }
@@ -146,7 +152,7 @@ object Updates {
         if (readingNotes) return
         readingNotes = true
         scope.launch {
-            val json = runCatching { withContext(Dispatchers.IO) { read(NOTES_URL) } }
+            val json = runCatching { withContext(Dispatchers.IO) { read(REPO_API_PROXY) } }
                 .onFailure { Log.i(TAG, "release notes: ${it.javaClass.simpleName}") }.getOrNull()
             readingNotes = false
             val parsed = json?.let { runCatching { ReleaseNotesParser.parse(it, current, latest, zh) }.getOrNull() }
@@ -178,6 +184,40 @@ object Updates {
         } finally {
             c.disconnect()
         }
+    }
+
+    /**
+     * 从本仓库最新 Release 取版本号：标签去前导 v、去 "-" 后缀（如 v1.96-custom → 1.96）。
+     * 优先走 gh-proxy 适配国内网络，直连 GitHub 兜底；都失败返回 null（不提示更新）。
+     */
+    private fun latestVersion(): String? {
+        for (api in listOf(REPO_API_PROXY, REPO_API)) {
+            val json = runCatching { read(api) }.getOrNull() ?: continue
+            val tag = runCatching { JSONObject(json).getString("tag_name") }.getOrNull() ?: continue
+            val v = tag.removePrefix("v").substringBefore('-')
+            if (v.isNotEmpty()) return v
+        }
+        return null
+    }
+
+    /**
+     * 从本仓库最新 Release 取当前风味 APK 的下载直链：优先 gh-proxy，直连 GitHub 兜底。
+     * 按风味（standard/guard）匹配资产名，兼容 aerial-standard.apk 与 app-standard-release.apk 等命名。
+     */
+    private fun latestAssetUrl(flavor: String): List<String>? {
+        for (api in listOf(REPO_API_PROXY, REPO_API)) {
+            val json = runCatching { read(api) }.getOrNull() ?: continue
+            val assets = runCatching { JSONObject(json).getJSONArray("assets") }.getOrNull() ?: continue
+            for (i in 0 until assets.length()) {
+                val a = assets.optJSONObject(i) ?: continue
+                val name = a.optString("name")
+                if (name.endsWith(".apk") && name.contains(flavor, ignoreCase = true)) {
+                    val direct = a.optString("browser_download_url")
+                    if (direct.isNotEmpty()) return listOf("https://gh-proxy.com/$direct", direct)
+                }
+            }
+        }
+        return null
     }
 
     // ---- Installing the new version from Control Center ----
@@ -587,7 +627,7 @@ object Updates {
      */
     @Volatile var testApk: File? = null
 
-    /** The website first (reachable in China), then GitHub. Returns the APK's info once it parses. */
+    /** 从本仓库最新 Release 下载当前风味的 APK（走代理，直连兜底）。返回解析出的包信息。 */
     private suspend fun downloadFrom(context: Context, file: File): PackageInfo? {
         testApk?.takeIf { it.isFile }?.let { test ->
             file.parentFile?.mkdirs()
@@ -595,11 +635,7 @@ object Updates {
             if (Build.VERSION.SDK_INT < 24) file.setReadable(true, false)
             return verify(context, file)
         }
-        val name = "aerial-${BuildConfig.FLAVOR}.apk"
-        val sources = listOf(
-            "https://aerial.qust.me/download/$name",
-            "https://github.com/pengchujin/aerial-tv/releases/latest/download/$name",
-        )
+        val sources = latestAssetUrl(BuildConfig.FLAVOR) ?: return null
         for (url in sources) {
             val ok = runCatching { download(url, file) }
                 .onFailure { Log.w(TAG, "could not download $url", it) }
